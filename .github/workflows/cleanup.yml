@@ -1,0 +1,70 @@
+name: Cleanup Skipped Runs
+
+on:
+  workflow_run:
+    workflows: ["D-Link DIR 1360 A1 OpenWrt Builder"]
+    types:
+      - completed
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Analyze logs & decide deletion
+        run: |
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+
+          echo "Checking run $RUN_ID"
+
+          # Always keep failed runs
+          if [ "$CONCLUSION" = "failure" ]; then
+            echo "Failed run → KEEP"
+            exit 0
+          fi
+
+          # Wait for logs to be available
+          sleep 15
+
+          # Download logs safely
+          gh api repos/$REPO/actions/runs/$RUN_ID/logs > logs.zip || exit 0
+          unzip -q logs.zip -d logs || exit 0
+
+          echo "Scanning logs for real build marker..."
+
+          # Detect real compilation (your custom marker)
+          if grep -r "Starting compilation for D-Link DIR-1360 A1" logs >/dev/null; then
+            echo "Real build detected → KEEP"
+            exit 0
+          fi
+
+          # If no build marker found → delete run
+          echo "No compilation detected → DELETE"
+          gh api repos/$REPO/actions/runs/$RUN_ID -X DELETE
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Delete old cleanup runs
+        run: |
+          REPO="${{ github.repository }}"
+
+          gh api repos/$REPO/actions/runs \
+            --jq '.workflow_runs[] 
+            | select(.name=="Cleanup Skipped Runs") 
+            | select(.status=="completed") 
+            | "\(.id)"' \
+          | while read run_id; do
+
+              if [ "$run_id" != "${{ github.run_id }}" ]; then
+                echo "Deleting old cleanup run $run_id"
+                gh api repos/$REPO/actions/runs/$run_id -X DELETE
+              fi
+
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
