@@ -1,0 +1,62 @@
+name: Cleanup Skipped Runs
+
+on:
+  workflow_run:
+    workflows: ["D-Link DIR 1360 A1 OpenWrt Builder"]
+    types:
+      - completed
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete skipped build run
+        run: |
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.event.workflow_run.id }}"
+
+          # Download logs
+          gh api repos/$REPO/actions/runs/$RUN_ID/logs > logs.zip
+          unzip logs.zip -d logs
+
+          # Count skipped messages
+          SKIP_COUNT=$(grep -r -E "Already built → skip|No valid release found yet → skipping|already compiled & exists" logs | wc -l)
+
+          # Get total jobs in workflow (matrix count)
+          TOTAL_JOBS=$(gh api repos/$REPO/actions/runs/$RUN_ID/jobs --jq '.jobs | length')
+
+          echo "Detected skip count: $SKIP_COUNT"
+          echo "Total jobs in run: $TOTAL_JOBS"
+
+          if [ "$SKIP_COUNT" -ge "$TOTAL_JOBS" ]; then
+            echo "All jobs skipped → deleting run"
+            gh api repos/$REPO/actions/runs/$RUN_ID -X DELETE
+          else
+            echo "At least one job executed → keeping run"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Delete old cleanup runs
+        run: |
+          REPO="${{ github.repository }}"
+
+          gh api repos/$REPO/actions/runs \
+            --jq '.workflow_runs[] 
+            | select(.name=="Cleanup Skipped Runs") 
+            | select(.status=="completed") 
+            | "\(.id) \(.created_at)"' \
+          | while read run_id created; do
+
+              if [ "$run_id" != "${{ github.run_id }}" ]; then
+                echo "Deleting old cleanup run $run_id"
+                gh api repos/$REPO/actions/runs/$run_id -X DELETE
+              fi
+
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
