@@ -110,11 +110,8 @@ jobs:
         git clone https://github.com/openwrt/openwrt.git
         cd openwrt
 
-        if [[ "$BRANCH" == "24.10" ]]; then
-          git checkout v24.10.5
-        else
-          git checkout $TAG
-        fi
+        echo "Checking out $TAG"
+        git checkout $TAG
 
         ./scripts/feeds update -a
         ./scripts/feeds install -a
