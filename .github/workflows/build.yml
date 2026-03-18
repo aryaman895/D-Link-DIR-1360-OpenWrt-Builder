@@ -203,5 +203,6 @@ jobs:
         files: |
           openwrt/bin/targets/ramips/mt7621/*factory.bin
           openwrt/bin/targets/ramips/mt7621/*sysupgrade.bin
+        make_latest: ${{ matrix.branch == '25.12' && 'true' || 'false' }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
