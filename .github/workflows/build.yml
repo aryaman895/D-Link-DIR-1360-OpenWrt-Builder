@@ -36,23 +36,35 @@ jobs:
         BRANCH="${{ matrix.branch }}"
         echo "Processing branch: $BRANCH"
 
-        TAG=$(git ls-remote --tags https://github.com/openwrt/openwrt.git \
-        | grep "refs/tags/v$BRANCH." \
-        | grep -v rc \
-        | grep -v "{}" \
-        | sed 's#.*/v##' \
-        | sort -V \
-        | tail -n1)
+        TAG_LIST=$(git ls-remote --tags https://github.com/openwrt/openwrt.git | \
+          grep "refs/tags/v$BRANCH." | \
+          grep -v rc | \
+          grep -v "{}" | \
+          sed 's#.*/v##' | \
+          sort -V)
 
-        if [ -z "$TAG" ]; then
-          echo "Failed to detect version"
-          exit 1
+        VALID_TAG=""
+
+        for t in $TAG_LIST; do
+          echo "Checking $t..."
+
+          if curl -sf https://downloads.openwrt.org/releases/$t/targets/ramips/mt7621/config.buildinfo > /dev/null; then
+            VALID_TAG=$t
+          else
+            echo "Skipping $t (not released yet)"
+          fi
+        done
+
+        if [ -z "$VALID_TAG" ]; then
+          echo "No valid release found yet → skipping"
+          echo "skip=true" >> $GITHUB_OUTPUT
+          exit 0
         fi
 
-        VERSION="$TAG"
+        VERSION="$VALID_TAG"
 
         echo "Detected version: $VERSION"
-        echo "tag=v$TAG" >> $GITHUB_OUTPUT
+        echo "tag=v$VERSION" >> $GITHUB_OUTPUT
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
         if gh release view openwrt-$VERSION >/dev/null 2>&1; then
@@ -63,19 +75,21 @@ jobs:
 
         if [[ "$BRANCH" == "22.03" ]] && gh release view openwrt-22.03.7 >/dev/null 2>&1; then
           echo "22.03 already compiled & exists"
+          echo "skip=true" >> $GITHUB_OUTPUT
           exit 0
         fi
 
         if [[ "$BRANCH" == "23.05" ]] && gh release view openwrt-23.05.5 >/dev/null 2>&1; then
           echo "23.05 already compiled & exists"
+          echo "skip=true" >> $GITHUB_OUTPUT
           exit 0
         fi
 
         if [[ "$BRANCH" == "24.10" ]] && gh release view openwrt-24.10.5 >/dev/null 2>&1; then
           echo "24.10 already compiled & exists"
+          echo "skip=true" >> $GITHUB_OUTPUT
           exit 0
         fi
-
 
         echo "Proceeding with build"
         echo "skip=false" >> $GITHUB_OUTPUT
