@@ -14,37 +14,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Delete skipped build run
+      - name: Analyze logs & decide deletion
         run: |
           REPO="${{ github.repository }}"
           RUN_ID="${{ github.event.workflow_run.id }}"
+          CONCLUSION="${{ github.event.workflow_run.conclusion }}"
 
-          JOBS_JSON=$(gh api repos/$REPO/actions/runs/$RUN_ID/jobs)
+          echo "Checking run $RUN_ID"
 
-          TOTAL_JOBS=$(echo "$JOBS_JSON" | jq '.jobs | length')
+          # Keep failed runs
+          if [ "$CONCLUSION" = "failure" ]; then
+            echo "Failed run → KEEP"
+            exit 0
+          fi
 
-          BUILT_JOBS=0
+          # Wait for logs to be ready (fixes zip errors)
+          sleep 15
 
-          for job_id in $(echo "$JOBS_JSON" | jq -r '.jobs[].id'); do
-            echo "Checking job $job_id"
+          # Download logs safely
+          gh api repos/$REPO/actions/runs/$RUN_ID/logs > logs.zip || exit 0
+          unzip -q logs.zip -d logs || exit 0
 
-            gh api repos/$REPO/actions/jobs/$job_id/logs > job_logs.zip
-            unzip -o job_logs.zip -d job_logs_$job_id >/dev/null
+          echo "Scanning logs..."
 
-            if grep -r -E "make\[[0-9]+\]|Entering directory" job_logs_$job_id; then
-              echo "Build detected in job $job_id"
-              BUILT_JOBS=$((BUILT_JOBS+1))
-            fi
-          done
+          # Detect real build
+          if grep -r "Proceeding with build" logs >/dev/null; then
+            echo "Real build detected → KEEP"
+            exit 0
+          fi
 
-          echo "Total jobs: $TOTAL_JOBS"
-          echo "Jobs with actual build: $BUILT_JOBS"
+          # Count skip signals (all variants)
+          skip_count=$(grep -r -E "Already built → skip|already compiled & exists|No valid release found yet → skipping" logs | wc -l)
 
-          if [ "$BUILT_JOBS" -eq 0 ]; then
-            echo "All jobs skipped → deleting run"
+          echo "Skip count: $skip_count"
+
+          # You have 4 matrix jobs → expect 4 skips
+          if [ "$skip_count" -ge 4 ]; then
+            echo "All matrix jobs skipped → DELETE"
             gh api repos/$REPO/actions/runs/$RUN_ID -X DELETE
           else
-            echo "At least one job built → keeping run"
+            echo "Unknown/mixed → KEEP (safe)"
           fi
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
@@ -52,20 +61,16 @@ jobs:
       - name: Delete old cleanup runs
         run: |
           REPO="${{ github.repository }}"
-          CURRENT_RUN="${{ github.run_id }}"
 
           gh api repos/$REPO/actions/runs \
             --jq '.workflow_runs[] 
             | select(.name=="Cleanup Skipped Runs") 
             | select(.status=="completed") 
-            | .id' \
+            | "\(.id)"' \
           | while read run_id; do
 
-              if [ "$run_id" != "$CURRENT_RUN" ]; then
-                echo "Deleting old cleanup run $run_id"
+              if [ "$run_id" != "${{ github.run_id }}" ]; then
                 gh api repos/$REPO/actions/runs/$run_id -X DELETE
-              else
-                echo "Skipping current cleanup run"
               fi
 
           done
