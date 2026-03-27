@@ -188,6 +188,8 @@ jobs:
       run: |
         cd openwrt
 
+        echo "Starting compilation for D-Link DIR-1360 A1"
+
         if [[ "${{ matrix.branch }}" == "22.03" ]]; then
           make HOSTCC=gcc-11 HOSTCXX=g++-11 -j$(nproc)
         else
