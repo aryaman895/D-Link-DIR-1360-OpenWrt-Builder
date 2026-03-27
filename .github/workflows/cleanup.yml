@@ -19,24 +19,32 @@ jobs:
           REPO="${{ github.repository }}"
           RUN_ID="${{ github.event.workflow_run.id }}"
 
-          # Download logs
-          gh api repos/$REPO/actions/runs/$RUN_ID/logs > logs.zip
-          unzip logs.zip -d logs
+          JOBS_JSON=$(gh api repos/$REPO/actions/runs/$RUN_ID/jobs)
 
-          # Count skipped messages
-          SKIP_COUNT=$(grep -r -E "Already built → skip|No valid release found yet → skipping|already compiled & exists" logs | wc -l)
+          TOTAL_JOBS=$(echo "$JOBS_JSON" | jq '.jobs | length')
 
-          # Get total jobs in workflow (matrix count)
-          TOTAL_JOBS=$(gh api repos/$REPO/actions/runs/$RUN_ID/jobs --jq '.jobs | length')
+          BUILT_JOBS=0
 
-          echo "Detected skip count: $SKIP_COUNT"
-          echo "Total jobs in run: $TOTAL_JOBS"
+          for job_id in $(echo "$JOBS_JSON" | jq -r '.jobs[].id'); do
+            echo "Checking job $job_id"
 
-          if [ "$SKIP_COUNT" -ge "$TOTAL_JOBS" ]; then
+            gh api repos/$REPO/actions/jobs/$job_id/logs > job_logs.zip
+            unzip -o job_logs.zip -d job_logs_$job_id >/dev/null
+
+            if grep -r -E "make\[[0-9]+\]|Entering directory" job_logs_$job_id; then
+              echo "Build detected in job $job_id"
+              BUILT_JOBS=$((BUILT_JOBS+1))
+            fi
+          done
+
+          echo "Total jobs: $TOTAL_JOBS"
+          echo "Jobs with actual build: $BUILT_JOBS"
+
+          if [ "$BUILT_JOBS" -eq 0 ]; then
             echo "All jobs skipped → deleting run"
             gh api repos/$REPO/actions/runs/$RUN_ID -X DELETE
           else
-            echo "At least one job executed → keeping run"
+            echo "At least one job built → keeping run"
           fi
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
@@ -44,17 +52,20 @@ jobs:
       - name: Delete old cleanup runs
         run: |
           REPO="${{ github.repository }}"
+          CURRENT_RUN="${{ github.run_id }}"
 
           gh api repos/$REPO/actions/runs \
             --jq '.workflow_runs[] 
             | select(.name=="Cleanup Skipped Runs") 
             | select(.status=="completed") 
-            | "\(.id) \(.created_at)"' \
-          | while read run_id created; do
+            | .id' \
+          | while read run_id; do
 
-              if [ "$run_id" != "${{ github.run_id }}" ]; then
+              if [ "$run_id" != "$CURRENT_RUN" ]; then
                 echo "Deleting old cleanup run $run_id"
                 gh api repos/$REPO/actions/runs/$run_id -X DELETE
+              else
+                echo "Skipping current cleanup run"
               fi
 
           done
