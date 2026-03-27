@@ -68,3 +68,11 @@ jobs:
           done
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Self-destruct current run
+        if: always()
+        run: |
+          echo "Self-destructing current run ${{ github.run_id }}..."
+          gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }} -X DELETE
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
