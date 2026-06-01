@@ -167,7 +167,7 @@ jobs:
              package/kernel/mt76/patches/
         fi
 
-        if [[ "$BRANCH" == "23.05" || "$BRANCH" == "24.10" ]]; then
+        if [[ "$BRANCH" == "23.05" ]]; then
           mkdir -p target/linux/generic/backport-6.6
           cp ../patches/999-phy-led-deadlock-fix.patch \
              target/linux/generic/backport-6.6/
