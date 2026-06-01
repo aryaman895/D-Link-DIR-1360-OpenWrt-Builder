@@ -193,7 +193,7 @@ jobs:
         if [[ "${{ matrix.branch }}" == "22.03" ]]; then
           make HOSTCC=gcc-11 HOSTCXX=g++-11 -j$(nproc)
         else
-          make -j$(nproc)
+          make -j$(nproc) || make -j1 V=s
         fi
 
     - name: Upload firmware to Github Release
